@@ -1,12 +1,6 @@
-# NIGHTSHADE // Greedy Growers
+# NIGHTSHADE V3 — Greedy Growers
 
-Linoria-based local mechanics QA / automation harness for Greedy Growers.
-
-## Files
-
-- `nightshade.lua` — tiny public loader that downloads the chunked NIGHTSHADE client
-- `src/part-*.lua` — NIGHTSHADE client source split into raw-loadable chunks
-- `NightshadeSecurity.server.lua` — optional server-authority canary for the Protection Lab
+Purpose-built Greedy Growers automation using WindUI. V3 is a clean rebuild; it does not include the old server protection / honeypot test system.
 
 ## Loadstring
 
@@ -14,16 +8,47 @@ Linoria-based local mechanics QA / automation harness for Greedy Growers.
 loadstring(game:HttpGet("https://raw.githubusercontent.com/dylankirkgirg/nightshade-greedy-growers/main/nightshade.lua"))()
 ```
 
-## Protection Lab setup
+## V3 highlights
 
-1. Put `NightshadeSecurity.server.lua` in **ServerScriptService**.
-2. Start your game/server.
-3. Execute NIGHTSHADE with the loadstring above.
-4. Open **Protection Lab**.
-5. Toggle **Arm Active Protection Tests**.
-6. Type `ARM`.
-7. Run **Full Server-Authority Suite**.
+### Smart river seed sniper
+- Buys conveyor seeds without moving when the executor supports `fireproximityprompt` or `fireclickdetector`.
+- Checks the current replicated/displayed price first, then falls back to NIGHTSHADE's known seed database.
+- Hard affordability check before interaction.
+- Coin reserve and max-cost-per-seed controls.
+- Skip-on-unknown-cash and skip-on-unknown-price safety switches are enabled by default.
+- Specific seed, minimum rarity, highest affordable, and mutated-only modes.
+- Rare-seed notifications.
 
-A healthy test server should accept harmless baseline requests and reject forged identity, client-authored economy values, malformed values, impossible positions, replayed nonces, and excessive bursts. The honeypot test should register a security strike.
+### Farming
+- Auto harvest at a chosen `HarvestMultiplier`.
+- Auto collect fruit / Collect All.
+- Auto clear dead trees.
+- Auto plant and auto plant grown trees.
+- Own-plot filtering via replicated ownership values such as `OwnerUserId`.
+- Auto organise trees when the game exposes the interaction.
+- Auto sell fruits, sell all, and sell at max inventory.
 
-The normal automation path contains no direct gameplay RemoteEvent/RemoteFunction calls. The Protection Lab intentionally calls only the dedicated `ReplicatedStorage/NightshadeSecurity` canary endpoints.
+### Weather / mutations
+- Misty, Acid Rain, Rainbow, and Meteor Shower detection.
+- Weather-only planting filters.
+- Dewy, Shocked, Radioactive, Charged, Golden, Cosmic, and pet-mutation recognition when exposed to the client.
+
+### Farmer's Market / pets
+- Auto give market fruits.
+- Auto claim market tickets.
+- Ticket-safe pet egg buying with reserve checks.
+- Common through Mythic egg selection.
+- Auto place / hatch egg interaction support.
+
+### Utility
+- Conservative low-rarity seed composting.
+- Gear, worms, and furniture purchase automation only when a current price is exposed and affordable.
+- Auto claim index reward.
+- Guarded auto rebirth.
+- Anti-AFK.
+- Settings persistence when executor file APIs are available.
+- Diagnostics for current Greedy Growers world surfaces and executor capabilities.
+
+## Notes
+
+V3 intentionally contains no direct gameplay `FireServer()` or `InvokeServer()` calls. It interacts with the normal replicated prompt/click surfaces available to the client. Distance-free interactions require the executor to support the corresponding helper; the Diagnostics tab shows capability status.
