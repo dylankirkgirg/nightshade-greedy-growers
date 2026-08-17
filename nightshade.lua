@@ -15,7 +15,8 @@ for i = 1, 10 do
     source[i] = body
 end
 
-local combined = table.concat(source)
+-- Explicit newlines make chunk boundaries safe even if GitHub strips a final newline.
+local combined = table.concat(source, "\n")
 local fn, compileError = loadstring(combined)
 
 if not fn then
