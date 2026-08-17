@@ -1,140 +1,123 @@
-        end
+        sidebar = math.clamp(math.floor(width * 0.26), 96, 128)
+    elseif tablet then
+        width = math.clamp(vp.X - 42, 520, 760)
+        height = math.clamp(vp.Y - 80, 400, 590)
+        sidebar = 150
+    else
+        width = math.clamp(math.floor(vp.X * 0.58), 680, 860)
+        height = math.clamp(math.floor(vp.Y * 0.68), 500, 650)
+        sidebar = 180
     end
-    return false
+
+    return {
+        Viewport = vp,
+        Phone = phone,
+        Tablet = tablet,
+        Width = width,
+        Height = height,
+        Sidebar = sidebar,
+    }
 end
 
-local Window = {}
-Window.__index = Window
+local Layout = deviceLayout()
 
-function Window:Tab(info)
-    local title = tostring((type(info) == "table" and info.Title) or info or "Tab")
-    local rawTab = LinoriaWindow:AddTab(title)
-    local wrapper = {Raw = rawTab, Name = title, Count = 0, GroupIndex = 0, Group = nil}
+local Window = WindUI:CreateWindow({
+    Title = "NIGHTSHADE V4 // Greedy Growers",
+    Author = "NIGHTSHADE",
+    Folder = "NightshadeGGV4",
+    Icon = "sprout",
+    Size = UDim2.fromOffset(Layout.Width, Layout.Height),
+    Theme = "Dark",
+    Transparent = false,
+    Resizable = true,
+    SideBarWidth = Layout.Sidebar,
+    HideSearchBar = Layout.Phone,
+    ScrollBarEnabled = true,
+    NewElements = true,
+    User = {Enabled = false, Anonymous = true},
+    OpenButton = {
+        Title = "NIGHTSHADE",
+        CornerRadius = UDim.new(1, 0),
+        StrokeThickness = 2,
+        Enabled = true,
+        Draggable = true,
+        OnlyMobile = touch,
+        Scale = Layout.Phone and 0.52 or 0.62,
+        Color = ColorSequence.new(
+            Color3.fromHex("#1D78FF"),
+            Color3.fromHex("#7B5CFF")
+        ),
+    },
+    Topbar = {
+        Height = Layout.Phone and 40 or 44,
+        ButtonsType = "Mac",
+    },
+})
 
-    function wrapper:_nextGroup()
-        self.GroupIndex += 1
-        local suffix = self.GroupIndex == 1 and "" or (" " .. tostring(self.GroupIndex))
-        if self.GroupIndex % 2 == 1 then
-            self.Group = self.Raw:AddLeftGroupbox(self.Name .. suffix)
-        else
-            self.Group = self.Raw:AddRightGroupbox(self.Name .. suffix)
-        end
-        self.Count = 0
-        return self.Group
-    end
-
-    function wrapper:_group()
-        if not self.Group or self.Count >= 8 then self:_nextGroup() end
-        self.Count += 1
-        return self.Group
-    end
-
-    function wrapper:Toggle(spec)
-        local group = self:_group()
-        local id = nextUiId(spec.Title)
-        return group:AddToggle(id, {
-            Text = tostring(spec.Title or "Toggle"),
-            Default = spec.Value == true,
-            Tooltip = spec.Desc,
-            Callback = spec.Callback or function() end,
-        })
-    end
-
-    function wrapper:Slider(spec)
-        local group = self:_group()
-        local id = nextUiId(spec.Title)
-        local value = spec.Value or {}
-        local min = tonumber(value.Min) or 0
-        local max = tonumber(value.Max) or 100
-        local default = tonumber(value.Default) or min
-        local step = tonumber(spec.Step) or 1
-        return group:AddSlider(id, {
-            Text = tostring(spec.Title or "Slider"),
-            Default = default,
-            Min = min,
-            Max = max,
-            Rounding = roundingFromStep(step),
-            Compact = false,
-            Callback = function(v)
-                if step > 0 then v = math.floor((v / step) + 0.5) * step end
-                if spec.Callback then spec.Callback(v) end
-            end,
-        })
-    end
-
-    function wrapper:Dropdown(spec)
-        local group = self:_group()
-        local id = nextUiId(spec.Title)
-        return group:AddDropdown(id, {
-            Values = spec.Values or {},
-            Default = spec.Value or 1,
-            Multi = false,
-            Text = tostring(spec.Title or "Dropdown"),
-            Tooltip = spec.Desc,
-            Callback = spec.Callback or function() end,
-        })
-    end
-
-    function wrapper:Input(spec)
-        local group = self:_group()
-        local id = nextUiId(spec.Title)
-        return group:AddInput(id, {
-            Default = tostring(spec.Value or ""),
-            Numeric = false,
-            Finished = false,
-            Text = tostring(spec.Title or "Input"),
-            Tooltip = spec.Desc,
-            Placeholder = tostring(spec.Placeholder or ""),
-            Callback = spec.Callback or function() end,
-        })
-    end
-
-    function wrapper:Button(spec)
-        local group = self:_group()
-        return group:AddButton({
-            Text = tostring(spec.Title or "Button"),
-            Func = spec.Callback or function() end,
-            DoubleClick = false,
-            Tooltip = spec.Desc,
-        })
-    end
-
-    function wrapper:Paragraph(spec)
-        local group = self:_group()
-        local title = tostring(spec.Title or "")
-        local desc = tostring(spec.Desc or "")
-        local titleLabel = group:AddLabel(title, true)
-        local bodyLabel = group:AddLabel(desc, true)
-        local paragraph = {}
-        function paragraph:SetDesc(newDesc)
-            desc = tostring(newDesc or "")
-            setLinoriaLabel(bodyLabel, desc)
-        end
-        function paragraph:SetTitle(newTitle)
-            title = tostring(newTitle or "")
-            setLinoriaLabel(titleLabel, title)
-        end
-        return paragraph
-    end
-
-    return wrapper
-end
-
-function Window:Destroy()
-    pcall(function() Library:Unload() end)
-end
+pcall(function()
+    Window:Tag({
+        Title = "V4",
+        Icon = "sparkles",
+        Color = Color3.fromHex("#735CFF"),
+        Border = true,
+    })
+    Window:Tag({
+        Title = Layout.Phone and "PHONE" or (Layout.Tablet and "TABLET" or "DESKTOP"),
+        Icon = touch and "smartphone" or "monitor",
+        Color = touch and Color3.fromHex("#2F9DFF") or Color3.fromHex("#37D67A"),
+        Border = true,
+    })
+end)
 
 local function notify(title, content, duration)
     pcall(function()
-        Library:Notify(tostring(title or "NIGHTSHADE") .. "\n" .. tostring(content or ""), duration or 4)
+        WindUI:Notify({
+            Title = tostring(title or "NIGHTSHADE"),
+            Content = tostring(content or ""),
+            Duration = tonumber(duration) or 4,
+            Icon = "moon",
+        })
     end)
 end
 
-ThemeManager:SetLibrary(Library)
-SaveManager:SetLibrary(Library)
-SaveManager:IgnoreThemeSettings()
-ThemeManager:SetFolder("NightshadeGG")
-SaveManager:SetFolder("NightshadeGG/GreedyGrowersV4")
+local UIState = {
+    AutoFit = true,
+    Scale = Layout.Phone and 0.90 or 1,
+    LastViewport = Layout.Viewport,
+}
+
+local function applyUIScale(value)
+    value = math.clamp(tonumber(value) or UIState.Scale, 0.65, 1.15)
+    UIState.Scale = value
+    pcall(function() Window:SetUIScale(value) end)
+end
+
+local function fitWindowToDevice(resetScale)
+    Layout = deviceLayout()
+    if resetScale then
+        UIState.Scale = Layout.Phone and 0.90 or 1
+    end
+    applyUIScale(UIState.Scale)
+    pcall(function()
+        Window:SetSize(UDim2.fromOffset(Layout.Width, Layout.Height))
+    end)
+end
+
+applyUIScale(UIState.Scale)
+
+-- Re-fit after phone/tablet rotation, split-screen changes, or desktop resize.
+task.spawn(function()
+    while Runtime.Running do
+        task.wait(0.45)
+        local vp = viewportSize()
+        if vp ~= UIState.LastViewport then
+            UIState.LastViewport = vp
+            if UIState.AutoFit then
+                fitWindowToDevice(false)
+            end
+        end
+    end
+end)
 
 --========================================================
 -- REPLICATED DATA READERS
@@ -191,30 +174,3 @@ local function tickets()
     return readNumber({"Tickets", "Ticket", "TICKETS"})
 end
 
-local function inventoryCount()
-    return readNumber({"InventoryCount", "InventorySize", "FruitCount", "Storage", "STORAGE_SIZE", "Fruits"})
-end
-
-local function inventoryMax()
-    return readNumber({"STORAGE_MAX_SIZE", "StorageMaxSize", "InventoryMax", "MaxInventory", "StorageLimit"})
-end
-
-local function character()
-    local c = Player.Character
-    if not c then return nil end
-    local h = c:FindFirstChildOfClass("Humanoid")
-    local r = c:FindFirstChild("HumanoidRootPart")
-    if not h or not r or h.Health <= 0 then return nil end
-    return c, h, r
-end
-
---========================================================
--- INTERACTION INDEX
---========================================================
-
-local function isInteraction(inst)
-    return inst and (inst:IsA("ProximityPrompt") or inst:IsA("ClickDetector"))
-end
-
-for _, d in ipairs(Workspace:GetDescendants()) do
-    if isInteraction(d) then Runtime.InteractionSet[d] = true end
