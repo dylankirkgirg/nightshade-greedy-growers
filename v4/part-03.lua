@@ -174,3 +174,31 @@ local function tickets()
     return readNumber({"Tickets", "Ticket", "TICKETS"})
 end
 
+local function inventoryCount()
+    return readNumber({"InventoryCount", "InventorySize", "FruitCount", "Storage", "STORAGE_SIZE", "Fruits"})
+end
+
+local function inventoryMax()
+    return readNumber({"STORAGE_MAX_SIZE", "StorageMaxSize", "InventoryMax", "MaxInventory", "StorageLimit"})
+end
+
+local function character()
+    local c = Player.Character
+    if not c then return nil end
+    local h = c:FindFirstChildOfClass("Humanoid")
+    local r = c:FindFirstChild("HumanoidRootPart")
+    if not h or not r or h.Health <= 0 then return nil end
+    return c, h, r
+end
+
+--========================================================
+-- INTERACTION INDEX
+--========================================================
+
+local function isInteraction(inst)
+    return inst and (inst:IsA("ProximityPrompt") or inst:IsA("ClickDetector"))
+end
+
+for _, d in ipairs(Workspace:GetDescendants()) do
+    if isInteraction(d) then Runtime.InteractionSet[d] = true end
+end
