@@ -1,3 +1,12 @@
+end
+
+local function readAny(inst, keys)
+    if not inst then return nil end
+    local nodes = {inst}
+    local model = firstAncestorModel(inst)
+    if model and model ~= inst then table.insert(nodes, model) end
+    if model and model.Parent then table.insert(nodes, model.Parent) end
+
     for _, node in ipairs(nodes) do
         for _, key in ipairs(keys) do
             local v = safeAttr(node, key)
@@ -170,51 +179,33 @@ end
 loadConfig()
 
 --========================================================
--- LINORIA UI
+-- WINDUI // CROSS-DEVICE UI
 --========================================================
 
-local LINORIA_REPO = "https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/"
-local Library = loadstring(game:HttpGet(LINORIA_REPO .. "Library.lua"))()
-local ThemeManager = loadstring(game:HttpGet(LINORIA_REPO .. "addons/ThemeManager.lua"))()
-local SaveManager = loadstring(game:HttpGet(LINORIA_REPO .. "addons/SaveManager.lua"))()
-ENV.NIGHTSHADE_LINORIA = Library
+local UIS = UserInputService
+local touch = UIS.TouchEnabled
+local WindUI = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"
+))()
+ENV.NIGHTSHADE_WINDUI = WindUI
 
-local LinoriaWindow = Library:CreateWindow({
-    Title = "NIGHTSHADE V4 // Greedy Growers",
-    Center = true,
-    AutoShow = true,
-    TabPadding = 8,
-    MenuFadeTime = 0.18,
-})
-
-local LinoriaIds = 0
-local function nextUiId(prefix)
-    LinoriaIds += 1
-    local clean = tostring(prefix or "Control"):gsub("[^%w_]", "_")
-    return "NS4_" .. clean .. "_" .. tostring(LinoriaIds)
+local function viewportSize()
+    local camera = Workspace.CurrentCamera
+    return camera and camera.ViewportSize or Vector2.new(1280, 720)
 end
 
-local function roundingFromStep(step)
-    step = tonumber(step) or 1
-    if step >= 1 then return 0 end
-    local decimals, value = 0, step
-    while value < 1 and decimals < 4 do
-        value *= 10
-        decimals += 1
-    end
-    return decimals
-end
+local function deviceLayout()
+    local vp = viewportSize()
+    local phone = touch and math.min(vp.X, vp.Y) < 600
+    local tablet = touch and not phone
 
-local function setLinoriaLabel(label, text)
-    text = tostring(text or "")
-    if typeof(label) == "Instance" and label:IsA("TextLabel") then
-        label.Text = text
-        return true
-    end
-    if type(label) == "table" then
-        for _, key in ipairs({"TextLabel", "Label", "Instance"}) do
-            local inst = rawget(label, key)
-            if typeof(inst) == "Instance" and inst:IsA("TextLabel") then
-                inst.Text = text
-                return true
-            end
+    local marginX = phone and 18 or 30
+    local marginY = phone and 54 or 70
+
+    local width
+    local height
+    local sidebar
+
+    if phone then
+        width = math.clamp(vp.X - marginX, 340, 560)
+        height = math.clamp(vp.Y - marginY, 285, 470)
