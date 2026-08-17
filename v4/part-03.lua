@@ -201,4 +201,3 @@ end
 
 for _, d in ipairs(Workspace:GetDescendants()) do
     if isInteraction(d) then Runtime.InteractionSet[d] = true end
-end
