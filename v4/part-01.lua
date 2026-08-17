@@ -8,7 +8,7 @@
       - strict affordability / price-source guards before any seed purchase
       - no direct gameplay FireServer / InvokeServer calls
       - cached interaction index to avoid repeated Workspace-wide scans
-      - Linoria UI with a game-aware action layer
+      - WindUI cross-device UI with a game-aware action layer
       - no server protection / honeypot code
 ]]
 
@@ -209,12 +209,3 @@ local function buildText(inst, depth)
     end
 
     return lower(table.concat(out, " "))
-end
-
-local function readAny(inst, keys)
-    if not inst then return nil end
-    local nodes = {inst}
-    local model = firstAncestorModel(inst)
-    if model and model ~= inst then table.insert(nodes, model) end
-    if model and model.Parent then table.insert(nodes, model.Parent) end
-
