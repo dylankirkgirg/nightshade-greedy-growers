@@ -188,7 +188,11 @@ function NS.Resolvers.resolveCurrency()
 	local candidates = NS.State.scan.currencyCandidates
 	if #candidates > 0 then
 		local first = candidates[1]
-		if first.isAttribute then
+		-- ponytail: real Instances error ("X is not a valid member of Y") on an
+		-- unknown field access — must check type() before touching .isAttribute,
+		-- can't rely on nil-safe indexing like a plain table. Confirmed live via
+		-- dev console: "isAttribute is not a valid member of StringValue".
+		if type(first) == "table" then
 			return true, first, string.format("attribute %s = %s", first.name, tostring(first.value))
 		end
 		return true, first, first:GetFullName() .. " = " .. tostring(first.Value)
@@ -407,7 +411,7 @@ function NS.Actions.dumpRuntimeContract()
 
 	NS.Logger.log("DUMP", "Currency candidates (" .. #NS.State.scan.currencyCandidates .. "):")
 	for _, c in ipairs(NS.State.scan.currencyCandidates) do
-		if c.isAttribute then
+		if type(c) == "table" then
 			NS.Logger.log("DUMP", "  attribute " .. c.name .. " = " .. tostring(c.value))
 		else
 			NS.Logger.log("DUMP", "  " .. c:GetFullName() .. " = " .. tostring(c.Value))
@@ -428,7 +432,7 @@ NS.Verification = {}
 function NS.Verification.snapshotCurrency()
 	local ok, inst = NS.Resolvers.resolveCurrency()
 	if not ok then return nil end
-	if inst.isAttribute then
+	if type(inst) == "table" then
 		return NS.Runtime.LocalPlayer:GetAttribute(inst.name)
 	end
 	return inst.Value
