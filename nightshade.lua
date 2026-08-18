@@ -63,6 +63,7 @@ NS.Runtime = {
 }
 
 function NS.Runtime.cleanup()
+	NS.State.autoRescan = false
 	for _, conn in ipairs(NS.State.connections) do
 		pcall(function() conn:Disconnect() end)
 	end
@@ -448,6 +449,25 @@ function NS.Actions.testPurchase(seed)
 		return
 	end
 
+	-- ponytail: the conveyor cycles seeds every few seconds, so a SpawnId
+	-- scanned even a minute ago can be stale by click time. Re-read live off
+	-- the actual Instance right before firing instead of trusting the cached
+	-- value — confirmed live that a stale SpawnId gets a clean `false` back
+	-- from the server (rejected, not errored).
+	if not seed.instance or not seed.instance.Parent then
+		NS.Logger.fail("Seed " .. seed.name .. " is no longer on the conveyor (stale) — pick again")
+		return
+	end
+	local liveSpawnId = seed.instance:GetAttribute("SpawnId")
+	if liveSpawnId == nil then
+		NS.Logger.fail("Seed " .. seed.name .. " instance still exists but SpawnId is gone (stale)")
+		return
+	end
+	if liveSpawnId ~= seed.spawnId then
+		NS.Logger.resolve("SpawnId changed since selection: " .. tostring(seed.spawnId) .. " -> " .. tostring(liveSpawnId))
+		seed.spawnId = liveSpawnId
+	end
+
 	local okService, _, serviceDetail = NS.Resolvers.resolveSeedConveyorService()
 	local okFn, fn, fnDetail = NS.Resolvers.resolveRequestPurchase()
 	if not okService or not okFn then
@@ -498,6 +518,23 @@ function NS.Actions.testPurchase(seed)
 	end
 end
 
+-- ponytail: keep the seed button ROW fresh too, not just the click-time
+-- revalidation above — otherwise every button on screen is stale within a
+-- few seconds of boot since the conveyor cycles continuously.
+NS.State.autoRescan = true
+local function startSeedRescanLoop()
+	task.spawn(function()
+		while NS.State.autoRescan do
+			task.wait(3)
+			if not NS.State.autoRescan then break end
+			local ok = pcall(NS.Scanner.findSeeds)
+			if ok then
+				NS.UI.renderSeedButtons(NS.State.scan.seeds)
+			end
+		end
+	end)
+end
+
 -- ===== Wire up and boot =====
 NS.UI.build()
 
@@ -507,5 +544,6 @@ NS.UI.testPurchaseButton.MouseButton1Click:Connect(function()
 end)
 
 NS.Boot.run()
+startSeedRescanLoop()
 
 return NS
