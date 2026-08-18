@@ -1,3 +1,33 @@
+# NIGHTSHADE V5 Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Build `nightshade.lua`, a single-file Roblox recovery build that proves seed purchase works against Greedy Growers' real client contract, with a live PASS/FAIL health dashboard and no automation until that one action is verified.
+
+**Architecture:** One `NS` table with sub-namespaces (Config, State, Logger, Runtime, Scanner, Resolvers, UI, Boot, Actions, Verification) appended to the same file in order. Native `Instance.new` UI. No `loadstring`, no multi-file loader.
+
+**Tech Stack:** Luau (Roblox), executed via Opiumware executor. No external UI library, no test framework — verification is `luac -p` for syntax and live execution via computer-use + screenshot for behavior.
+
+**"Test" convention for this plan:** Roblox globals (`game`, `workspace`, `Instance`, `task`, etc.) don't exist outside Roblox, so a local Lua interpreter can only catch syntax errors, not run the script. Every step's syntax check is:
+
+```bash
+luac -p ~/nightshade-greedy-growers/nightshade.lua
+```
+
+Expected output on success: nothing (silent exit 0). On failure it prints a `nightshade.lua:N: ...` parse error — fix and re-run.
+
+Behavioral verification (does the game actually respond) happens only in Task 9, live in Opiumware via computer-use.
+
+---
+
+### Task 1: Skeleton — duplicate guard, Config, State, Logger, Runtime
+
+**Files:**
+- Create: `/Users/dylandg920/nightshade-greedy-growers/nightshade.lua`
+
+- [ ] **Step 1: Write the file**
+
+```lua
 --[[ NIGHTSHADE V5 — recovery build for Greedy Growers ]]
 
 if getgenv then
@@ -23,7 +53,7 @@ NS.State = {
 	connections = {},
 	scan = {
 		conveyorSeeds = nil,
-		seedConveyorService = nil,
+		serviceCandidates = {},
 		currencyCandidates = {},
 		seeds = {},
 	},
@@ -63,7 +93,6 @@ NS.Runtime = {
 }
 
 function NS.Runtime.cleanup()
-	NS.State.autoRescan = false
 	for _, conn in ipairs(NS.State.connections) do
 		pcall(function() conn:Disconnect() end)
 	end
@@ -74,6 +103,34 @@ function NS.Runtime.cleanup()
 	if getgenv then getgenv().__NIGHTSHADE_LOADED = nil end
 end
 
+return NS
+```
+
+- [ ] **Step 2: Syntax check**
+
+Run: `luac -p /Users/dylandg920/nightshade-greedy-growers/nightshade.lua`
+Expected: no output, exit code 0.
+
+- [ ] **Step 3: Commit**
+
+```bash
+cd /Users/dylandg920/nightshade-greedy-growers
+git add nightshade.lua
+git commit -m "nightshade: skeleton (config, state, logger, runtime)"
+```
+
+---
+
+### Task 2: Scanner
+
+**Files:**
+- Modify: `nightshade.lua` — insert before the trailing `return NS`
+
+- [ ] **Step 1: Insert Scanner code**
+
+Replace the line `return NS` at the end of the file with:
+
+```lua
 -- ===== Scanner =====
 NS.Scanner = {}
 
@@ -97,21 +154,20 @@ function NS.Scanner.findConveyorSeeds()
 	return found
 end
 
--- ponytail: exact-name lookup, not pattern-match — this game runs Knit, whose
--- own package tree has hundreds of *Service*/*Controller*-named internals that
--- drown out the real service under any capped pattern search. Confirmed live
--- via runtime probe (see docs/superpowers/plans) that the real service sits at
--- ReplicatedStorage.Packages._Index.sleitnick_knit@<ver>.knit.Services.SeedConveyorService
-function NS.Scanner.findSeedConveyorService()
-	local found = nil
+function NS.Scanner.findServiceCandidates()
+	local candidates = {}
+	local patterns = { "Service", "Controller" }
 	for _, descendant in ipairs(ReplicatedStorage:GetDescendants()) do
-		if descendant.Name == "SeedConveyorService" then
-			found = descendant
-			break
+		if #candidates >= NS.Config.MaxCandidates then break end
+		for _, pattern in ipairs(patterns) do
+			if string.find(descendant.Name, pattern) then
+				table.insert(candidates, descendant)
+				break
+			end
 		end
 	end
-	NS.State.scan.seedConveyorService = found
-	return found
+	NS.State.scan.serviceCandidates = candidates
+	return candidates
 end
 
 function NS.Scanner.findCurrencyCandidates()
@@ -119,14 +175,8 @@ function NS.Scanner.findCurrencyCandidates()
 	local player = NS.Runtime.LocalPlayer
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if leaderstats then
-		-- ponytail: confirmed live that Cash is a StringValue (e.g. "$306.88Qi"),
-		-- not Number/IntValue — widen to any ValueBase, prefer one literally named Cash
-		local cash = leaderstats:FindFirstChild("Cash")
-		if cash and cash:IsA("ValueBase") then
-			table.insert(candidates, cash)
-		end
 		for _, child in ipairs(leaderstats:GetChildren()) do
-			if child:IsA("ValueBase") and child ~= cash then
+			if child:IsA("NumberValue") or child:IsA("IntValue") then
 				table.insert(candidates, child)
 			end
 		end
@@ -142,25 +192,15 @@ function NS.Scanner.findCurrencyCandidates()
 	return candidates
 end
 
--- ponytail: confirmed live that ConveyorSeeds children are mostly utility
--- singletons (SeedDestroyer, SeedSplashFX, ...); only "SeedHolder" children
--- carry seed data, as attributes SeedType/SpawnId/Rarity — not "dataKey".
--- SpawnId identifies this specific spawned instance and is what gets bought.
 function NS.Scanner.findSeeds()
 	local seeds = {}
 	if NS.State.scan.conveyorSeeds then
 		for _, child in ipairs(NS.State.scan.conveyorSeeds:GetChildren()) do
-			if child.Name == "SeedHolder" then
-				local spawnId = child:GetAttribute("SpawnId")
-				if spawnId ~= nil then
-					table.insert(seeds, {
-						instance = child,
-						name = child:GetAttribute("SeedType") or child.Name,
-						spawnId = spawnId,
-						rarity = child:GetAttribute("Rarity"),
-					})
-				end
-			end
+			table.insert(seeds, {
+				instance = child,
+				name = child.Name,
+				dataKey = child:GetAttribute("dataKey"),
+			})
 		end
 	end
 	NS.State.scan.seeds = seeds
@@ -169,11 +209,39 @@ end
 
 function NS.Scanner.runAll()
 	NS.Scanner.findConveyorSeeds()
-	NS.Scanner.findSeedConveyorService()
+	NS.Scanner.findServiceCandidates()
 	NS.Scanner.findCurrencyCandidates()
 	NS.Scanner.findSeeds()
 end
 
+return NS
+```
+
+- [ ] **Step 2: Syntax check**
+
+Run: `luac -p /Users/dylandg920/nightshade-greedy-growers/nightshade.lua`
+Expected: no output, exit code 0.
+
+- [ ] **Step 3: Commit**
+
+```bash
+cd /Users/dylandg920/nightshade-greedy-growers
+git add nightshade.lua
+git commit -m "nightshade: add Scanner"
+```
+
+---
+
+### Task 3: Resolvers
+
+**Files:**
+- Modify: `nightshade.lua`
+
+- [ ] **Step 1: Insert Resolvers code**
+
+Replace `return NS` with:
+
+```lua
 -- ===== Resolvers =====
 NS.Resolvers = {}
 
@@ -189,11 +257,7 @@ function NS.Resolvers.resolveCurrency()
 	local candidates = NS.State.scan.currencyCandidates
 	if #candidates > 0 then
 		local first = candidates[1]
-		-- ponytail: real Instances error ("X is not a valid member of Y") on an
-		-- unknown field access — must check type() before touching .isAttribute,
-		-- can't rely on nil-safe indexing like a plain table. Confirmed live via
-		-- dev console: "isAttribute is not a valid member of StringValue".
-		if type(first) == "table" then
+		if first.isAttribute then
 			return true, first, string.format("attribute %s = %s", first.name, tostring(first.value))
 		end
 		return true, first, first:GetFullName() .. " = " .. tostring(first.Value)
@@ -202,35 +266,78 @@ function NS.Resolvers.resolveCurrency()
 end
 
 function NS.Resolvers.resolveSeedConveyorService()
-	local inst = NS.State.scan.seedConveyorService
-	if inst then
-		return true, inst, inst:GetFullName() .. " (" .. inst.ClassName .. ")"
+	for _, inst in ipairs(NS.State.scan.serviceCandidates) do
+		if string.find(inst.Name, "SeedConveyorService") then
+			return true, inst, inst:GetFullName() .. " (" .. inst.ClassName .. ")"
+		end
 	end
-	return false, nil, "exact-name descendant 'SeedConveyorService' not found under ReplicatedStorage"
+	local names = {}
+	for _, c in ipairs(NS.State.scan.serviceCandidates) do
+		table.insert(names, c.Name)
+	end
+	return false, nil, "not found by exact name; candidates: " .. table.concat(names, ", ")
 end
 
--- ponytail: confirmed live this is Knit's Comm folder layout — a Folder
--- containing an "RF" subfolder of RemoteFunctions (RequestPurchase lives
--- there), not a ModuleScript to require() and not a bare remote.
 function NS.Resolvers.resolveRequestPurchase()
 	local ok, serviceInst = NS.Resolvers.resolveSeedConveyorService()
 	if not ok then
 		return false, nil, "cannot resolve without SeedConveyorService"
 	end
 
-	local rf = serviceInst:FindFirstChild("RF")
-	if not rf then
-		return false, nil, "no RF folder under " .. serviceInst:GetFullName()
+	local target = serviceInst
+	if serviceInst:IsA("ModuleScript") then
+		local success, mod = pcall(require, serviceInst)
+		if success and type(mod) == "table" then
+			target = mod
+		else
+			return false, nil, "SeedConveyorService is a ModuleScript but require() failed or returned non-table"
+		end
 	end
 
-	local remote = rf:FindFirstChild("RequestPurchase")
-	if remote and remote:IsA("RemoteFunction") then
-		return true, remote, remote:GetFullName() .. " (RemoteFunction)"
+	if type(target) == "table" then
+		local fn = target.RequestPurchase
+		if fn then
+			return true, fn, "table method SeedConveyorService.RequestPurchase"
+		end
+		return false, nil, "module table has no RequestPurchase key"
 	end
 
-	return false, nil, "no RequestPurchase RemoteFunction under " .. rf:GetFullName()
+	local remote = serviceInst:FindFirstChild("RequestPurchase")
+	if remote and (remote:IsA("RemoteFunction") or remote:IsA("RemoteEvent")) then
+		return true, remote, remote:GetFullName() .. " (" .. remote.ClassName .. ")"
+	end
+
+	return false, nil, "no RequestPurchase child RemoteFunction/RemoteEvent under " .. serviceInst:GetFullName()
 end
 
+return NS
+```
+
+- [ ] **Step 2: Syntax check**
+
+Run: `luac -p /Users/dylandg920/nightshade-greedy-growers/nightshade.lua`
+Expected: no output, exit code 0.
+
+- [ ] **Step 3: Commit**
+
+```bash
+cd /Users/dylandg920/nightshade-greedy-growers
+git add nightshade.lua
+git commit -m "nightshade: add Resolvers"
+```
+
+---
+
+### Task 4: UI shell (dashboard + log console + buttons)
+
+**Files:**
+- Modify: `nightshade.lua`
+
+- [ ] **Step 1: Insert UI code**
+
+Replace `return NS` with:
+
+```lua
 -- ===== UI =====
 NS.UI = { dashboardLabels = {}, selectedSeed = nil }
 
@@ -353,6 +460,34 @@ function NS.UI.renderSeedButtons(seeds)
 	end
 end
 
+return NS
+```
+
+- [ ] **Step 2: Syntax check**
+
+Run: `luac -p /Users/dylandg920/nightshade-greedy-growers/nightshade.lua`
+Expected: no output, exit code 0.
+
+- [ ] **Step 3: Commit**
+
+```bash
+cd /Users/dylandg920/nightshade-greedy-growers
+git add nightshade.lua
+git commit -m "nightshade: add UI shell"
+```
+
+---
+
+### Task 5: Boot sequence (wires Scanner + Resolvers + UI dashboard)
+
+**Files:**
+- Modify: `nightshade.lua`
+
+- [ ] **Step 1: Insert Boot code**
+
+Replace `return NS` with:
+
+```lua
 -- ===== Boot =====
 NS.Boot = {}
 
@@ -393,12 +528,44 @@ function NS.Boot.run()
 	report("purchase", 9, okPurchase, "RequestPurchase: " .. detailPurchase)
 
 	local seeds = NS.State.scan.seeds
-	report("spawnid", 10, #seeds > 0,
-		"Seed SpawnId values detected: " .. #seeds .. " active SeedHolder(s)")
+	local withKey = 0
+	for _, s in ipairs(seeds) do
+		if s.dataKey then withKey = withKey + 1 end
+	end
+	report("datakey", 10, withKey > 0,
+		"Seed dataKey values detected: " .. withKey .. "/" .. #seeds)
 
 	NS.UI.renderSeedButtons(seeds)
 end
 
+return NS
+```
+
+- [ ] **Step 2: Syntax check**
+
+Run: `luac -p /Users/dylandg920/nightshade-greedy-growers/nightshade.lua`
+Expected: no output, exit code 0.
+
+- [ ] **Step 3: Commit**
+
+```bash
+cd /Users/dylandg920/nightshade-greedy-growers
+git add nightshade.lua
+git commit -m "nightshade: add Boot sequence"
+```
+
+---
+
+### Task 6: Actions — Dump Runtime Contract
+
+**Files:**
+- Modify: `nightshade.lua`
+
+- [ ] **Step 1: Insert dump action**
+
+Replace `return NS` with:
+
+```lua
 -- ===== Actions =====
 NS.Actions = {}
 
@@ -407,12 +574,14 @@ function NS.Actions.dumpRuntimeContract()
 	NS.Logger.log("DUMP", "ConveyorSeeds: " ..
 		(NS.State.scan.conveyorSeeds and NS.State.scan.conveyorSeeds:GetFullName() or "nil"))
 
-	NS.Logger.log("DUMP", "SeedConveyorService: " ..
-		(NS.State.scan.seedConveyorService and NS.State.scan.seedConveyorService:GetFullName() or "nil"))
+	NS.Logger.log("DUMP", "Service candidates (" .. #NS.State.scan.serviceCandidates .. "):")
+	for _, inst in ipairs(NS.State.scan.serviceCandidates) do
+		NS.Logger.log("DUMP", "  " .. inst:GetFullName() .. " (" .. inst.ClassName .. ")")
+	end
 
 	NS.Logger.log("DUMP", "Currency candidates (" .. #NS.State.scan.currencyCandidates .. "):")
 	for _, c in ipairs(NS.State.scan.currencyCandidates) do
-		if type(c) == "table" then
+		if c.isAttribute then
 			NS.Logger.log("DUMP", "  attribute " .. c.name .. " = " .. tostring(c.value))
 		else
 			NS.Logger.log("DUMP", "  " .. c:GetFullName() .. " = " .. tostring(c.Value))
@@ -421,19 +590,47 @@ function NS.Actions.dumpRuntimeContract()
 
 	NS.Logger.log("DUMP", "Seeds (" .. #NS.State.scan.seeds .. "):")
 	for _, s in ipairs(NS.State.scan.seeds) do
-		NS.Logger.log("DUMP", "  " .. s.name .. " spawnId=" .. tostring(s.spawnId) .. " rarity=" .. tostring(s.rarity))
+		NS.Logger.log("DUMP", "  " .. s.name .. " dataKey=" .. tostring(s.dataKey))
 	end
 
 	NS.Logger.log("DUMP", "----- End Dump -----")
 end
 
+return NS
+```
+
+- [ ] **Step 2: Syntax check**
+
+Run: `luac -p /Users/dylandg920/nightshade-greedy-growers/nightshade.lua`
+Expected: no output, exit code 0.
+
+- [ ] **Step 3: Commit**
+
+```bash
+cd /Users/dylandg920/nightshade-greedy-growers
+git add nightshade.lua
+git commit -m "nightshade: add Dump Runtime Contract action"
+```
+
+---
+
+### Task 7: Verification + Test Purchase action
+
+**Files:**
+- Modify: `nightshade.lua`
+
+- [ ] **Step 1: Insert Verification + testPurchase**
+
+Replace `return NS` with:
+
+```lua
 -- ===== Verification =====
 NS.Verification = {}
 
 function NS.Verification.snapshotCurrency()
 	local ok, inst = NS.Resolvers.resolveCurrency()
 	if not ok then return nil end
-	if type(inst) == "table" then
+	if inst.isAttribute then
 		return NS.Runtime.LocalPlayer:GetAttribute(inst.name)
 	end
 	return inst.Value
@@ -444,28 +641,9 @@ function NS.Actions.testPurchase(seed)
 		NS.Logger.fail("Test Purchase pressed with no seed selected")
 		return
 	end
-	if seed.spawnId == nil then
-		NS.Logger.fail("Selected seed " .. seed.name .. " has no SpawnId attribute")
+	if not seed.dataKey then
+		NS.Logger.fail("Selected seed " .. seed.name .. " has no dataKey attribute")
 		return
-	end
-
-	-- ponytail: the conveyor cycles seeds every few seconds, so a SpawnId
-	-- scanned even a minute ago can be stale by click time. Re-read live off
-	-- the actual Instance right before firing instead of trusting the cached
-	-- value — confirmed live that a stale SpawnId gets a clean `false` back
-	-- from the server (rejected, not errored).
-	if not seed.instance or not seed.instance.Parent then
-		NS.Logger.fail("Seed " .. seed.name .. " is no longer on the conveyor (stale) — pick again")
-		return
-	end
-	local liveSpawnId = seed.instance:GetAttribute("SpawnId")
-	if liveSpawnId == nil then
-		NS.Logger.fail("Seed " .. seed.name .. " instance still exists but SpawnId is gone (stale)")
-		return
-	end
-	if liveSpawnId ~= seed.spawnId then
-		NS.Logger.resolve("SpawnId changed since selection: " .. tostring(seed.spawnId) .. " -> " .. tostring(liveSpawnId))
-		seed.spawnId = liveSpawnId
 	end
 
 	local okService, _, serviceDetail = NS.Resolvers.resolveSeedConveyorService()
@@ -475,28 +653,28 @@ function NS.Actions.testPurchase(seed)
 		return
 	end
 
-	NS.Logger.resolve("Seed: " .. seed.name .. " spawnId=" .. tostring(seed.spawnId) .. " rarity=" .. tostring(seed.rarity))
+	NS.Logger.resolve("Seed: " .. seed.name .. " dataKey=" .. tostring(seed.dataKey))
 	NS.Logger.resolve("Service: " .. serviceDetail)
 	NS.Logger.resolve("RequestPurchase: " .. fnDetail)
 
 	local before = NS.Verification.snapshotCurrency()
 	NS.Logger.verify("Cash before = " .. tostring(before))
 
-	NS.Logger.action("RequestPurchase(" .. tostring(seed.spawnId) .. ")")
+	NS.Logger.action('RequestPurchase("' .. tostring(seed.dataKey) .. '")')
 
 	local success, result
 	if fn:IsA("RemoteFunction") then
 		success, result = pcall(function()
-			return fn:InvokeServer(seed.spawnId)
+			return fn:InvokeServer(seed.dataKey)
 		end)
 	elseif fn:IsA("RemoteEvent") then
 		success, result = pcall(function()
-			fn:FireServer(seed.spawnId)
+			fn:FireServer(seed.dataKey)
 			return "fired (RemoteEvent, no return value)"
 		end)
 	else
 		success, result = pcall(function()
-			return fn(seed.spawnId)
+			return fn(seed.dataKey)
 		end)
 	end
 
@@ -511,40 +689,39 @@ function NS.Actions.testPurchase(seed)
 	local after = NS.Verification.snapshotCurrency()
 	NS.Logger.verify("Cash after = " .. tostring(after))
 
-	-- ponytail: Cash is a rounded display string ("$305.12Qi") — a cheap seed's
-	-- cost often doesn't move the visible digits at quintillion scale, so a
-	-- string-equal cash diff false-negatives even on a real purchase. Confirmed
-	-- live: RequestPurchase returned true with before==after string. Trust the
-	-- server's own boolean result as primary signal; cash diff is corroboration
-	-- only, not a requirement.
-	if result == true then
-		if before ~= nil and after ~= nil and after ~= before then
-			NS.Logger.pass("Purchase confirmed: server returned true, cash changed " .. tostring(before) .. " -> " .. tostring(after))
-		else
-			NS.Logger.pass("Purchase confirmed: server returned true (cash delta too small to show in rounded display)")
-		end
+	if before ~= nil and after ~= nil and after ~= before then
+		NS.Logger.pass("Purchase confirmed: cash changed " .. tostring(before) .. " -> " .. tostring(after))
 	else
-		NS.Logger.fail("Purchase unconfirmed: server returned " .. tostring(result) .. " (before=" .. tostring(before) .. ", after=" .. tostring(after) .. ")")
+		NS.Logger.fail("Purchase unconfirmed: cash unchanged (before=" .. tostring(before) .. ", after=" .. tostring(after) .. ")")
 	end
 end
 
--- ponytail: keep the seed button ROW fresh too, not just the click-time
--- revalidation above — otherwise every button on screen is stale within a
--- few seconds of boot since the conveyor cycles continuously.
-NS.State.autoRescan = true
-local function startSeedRescanLoop()
-	task.spawn(function()
-		while NS.State.autoRescan do
-			task.wait(3)
-			if not NS.State.autoRescan then break end
-			local ok = pcall(NS.Scanner.findSeeds)
-			if ok then
-				NS.UI.renderSeedButtons(NS.State.scan.seeds)
-			end
-		end
-	end)
-end
+return NS
+```
 
+- [ ] **Step 2: Syntax check**
+
+Run: `luac -p /Users/dylandg920/nightshade-greedy-growers/nightshade.lua`
+Expected: no output, exit code 0.
+
+- [ ] **Step 3: Commit**
+
+```bash
+cd /Users/dylandg920/nightshade-greedy-growers
+git add nightshade.lua
+git commit -m "nightshade: add Verification + Test Purchase action"
+```
+
+---
+
+### Task 8: Wire it all up and boot
+
+**Files:**
+- Modify: `nightshade.lua`
+
+- [ ] **Step 1: Replace the final `return NS` with the wiring block**
+
+```lua
 -- ===== Wire up and boot =====
 NS.UI.build()
 
@@ -554,6 +731,65 @@ NS.UI.testPurchaseButton.MouseButton1Click:Connect(function()
 end)
 
 NS.Boot.run()
-startSeedRescanLoop()
 
 return NS
+```
+
+- [ ] **Step 2: Syntax check**
+
+Run: `luac -p /Users/dylandg920/nightshade-greedy-growers/nightshade.lua`
+Expected: no output, exit code 0.
+
+- [ ] **Step 3: Commit**
+
+```bash
+cd /Users/dylandg920/nightshade-greedy-growers
+git add nightshade.lua
+git commit -m "nightshade: wire UI, boot sequence, and actions together"
+```
+
+---
+
+### Task 9: Live verification in Opiumware
+
+**Files:** none (live testing only)
+
+- [ ] **Step 1: Read the full file**
+
+Read `/Users/dylandg920/nightshade-greedy-growers/nightshade.lua` to get the current full contents (needed to paste into the executor).
+
+- [ ] **Step 2: Attach to Opiumware / bring it forward**
+
+Use computer-use `request_access` for Opiumware if not already granted, then screenshot to confirm it's open with Greedy Growers running.
+
+- [ ] **Step 3: Paste script and execute**
+
+Click into the script editor pane, select-all + clear, type/paste the full `nightshade.lua` contents, click Execute/Inject.
+
+- [ ] **Step 4: Screenshot the NIGHTSHADE dashboard**
+
+Screenshot the game window. The NIGHTSHADE V5 frame should appear top-left with 10 dashboard lines. Read each PASS/FAIL line off the screenshot.
+
+- [ ] **Step 5: For any FAIL line, click "Dump Runtime Contract" and screenshot the log console**
+
+This surfaces the actual candidate names found (service candidates, currency candidates, seed list) so the resolver logic can be corrected against real names instead of assumed ones.
+
+- [ ] **Step 6: If all 10 dashboard checks PASS, run Test Purchase**
+
+Click a seed button, click "Test Purchase", screenshot the log console. Confirm the `[VERIFY] Cash before/after` lines show an actual delta and a final `[PASS] Purchase confirmed` line.
+
+- [ ] **Step 7: Report results back**
+
+Summarize which checks passed/failed and, if Test Purchase ran, whether it was confirmed. This determines whether Task 10 (fixing resolver assumptions against real names) is needed before this plan is considered done.
+
+---
+
+### Task 10 (conditional — only if Task 9 found FAILs): Fix resolver assumptions against real runtime data
+
+This task has no fixed code because it depends entirely on Task 9's dump output (actual instance names, actual currency location, actual service shape). When Task 9 completes:
+
+- [ ] **Step 1: List every FAIL line and its corresponding Dump Runtime Contract detail from the screenshots**
+- [ ] **Step 2: For each FAIL, update the matching resolver in `nightshade.lua`** (e.g. if `SeedConveyorService` is actually named differently, or currency lives somewhere the Scanner didn't check) — edit the specific `NS.Resolvers.resolveX` or `NS.Scanner.findX` function, keeping the same function signature and `(ok, result, detail)` return contract.
+- [ ] **Step 3: Syntax check** — `luac -p nightshade.lua`
+- [ ] **Step 4: Commit** — `git commit -m "nightshade: fix <resolver> against live runtime data"`
+- [ ] **Step 5: Re-run Task 9** until all 10 dashboard checks PASS and Test Purchase is confirmed.

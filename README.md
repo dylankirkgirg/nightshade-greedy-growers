@@ -1,6 +1,6 @@
-# NIGHTSHADE V3.1 — Greedy Growers
+# NIGHTSHADE V5 — Greedy Growers
 
-Purpose-built Greedy Growers automation using WindUI. V3.1 keeps the old V3 core available for rollback, but the public loader now routes to the stricter V3.1 build.
+Recovery build. V3/V3.1/V4 (`v3/`, `v31/`, `v4/`) used a generic ProximityPrompt/ClickDetector-guessing engine and a multipart chunk loader — both are the reason NIGHTSHADE stopped working reliably. V5 replaces that architecture entirely: one single Lua file, no loader, no prompt-guessing, and no feature is enabled until its underlying game action is confirmed working live.
 
 ## Loadstring
 
@@ -8,65 +8,28 @@ Purpose-built Greedy Growers automation using WindUI. V3.1 keeps the old V3 core
 loadstring(game:HttpGet("https://raw.githubusercontent.com/dylankirkgirg/nightshade-greedy-growers/main/nightshade.lua"))()
 ```
 
-## V3.1 highlights
+## Status
 
-### Strict river seed sniper
-- Buys conveyor seeds without moving when the executor supports `fireproximityprompt` or `fireclickdetector`.
-- Uses explicit replicated/displayed `Price` / `Cost` data first.
-- Falls back to the known seed database only for recognized Greedy Growers seeds.
-- Checks affordability before selecting a seed and re-checks immediately before interaction.
-- Coin reserve and max-cost-per-seed controls.
-- Skip-on-unknown-cash and skip-on-unknown-price guards.
-- Dry-run mode for testing targeting without pressing Buy.
-- Correct, separate behavior for Highest Affordable, Any Affordable, Specific Seed, and Minimum Rarity modes.
-- Optional mutation preference / mutated-only mode.
-- Rare-seed notifications.
+- **Boot health-check dashboard**: working — 10/10 checks pass live.
+- **Seed purchase**: proven live. `RequestPurchase(spawnId)` confirmed against the real Knit service contract.
+- Every other feature (harvest, collect, sell, plant, clear dead trees, pets, market, gear, worms, rebirth) is **not yet implemented** — each gets resolved and proven one at a time before it's added, per the design doc.
 
-### Performance / reliability
-- Caches all ProximityPrompt and ClickDetector interactions instead of repeatedly scanning the entire Workspace in every automation loop.
-- Tracks new/removed interactions dynamically.
-- Handles nested `ConveyorSeeds` layouts by preferring the nearest seed model around each conveyor interaction.
-- Per-interaction and per-seed cooldowns reduce duplicate actions.
-- Public loader uses a verified bootstrap before compiling V3.1.
+## Real client contract (confirmed live, not assumed)
 
-### Farming
-- Auto harvest at a chosen `HarvestMultiplier`.
-- Auto collect fruit / Collect All.
-- Auto clear dead trees.
-- Auto plant and auto plant grown trees.
-- Own-plot filtering through replicated ownership values such as `OwnerUserId`.
-- Auto organise trees when exposed by the game.
-- Auto sell fruits, sell all, and sell at max inventory.
+Greedy Growers runs on [Knit](https://github.com/Sleitnick/Knit). Client services live under `ReplicatedStorage.Packages._Index.sleitnick_knit@<ver>.knit.Services.<ServiceName>`, each a Folder with an `RF` subfolder of RemoteFunctions and an `RE` subfolder of RemoteEvents — reached by **exact instance name**, not by pattern-matching `*Service*`/`*Controller*` (Knit's own package internals drown out any capped pattern search).
 
-### Weather / mutations
-- Misty, Acid Rain, Rainbow, and Meteor Shower detection.
-- Weather-only planting filters.
-- Recognizes Dewy, Shocked, Radioactive, Charged, Golden, Cosmic, Infested, Huge, Slimy, and Scaled signals when exposed to the client.
-
-### Farmer's Market / pets
-- Auto give market fruits.
-- Auto claim market tickets.
-- Ticket-reserve-aware pet egg buying.
-- Common through Mythic egg selection.
-- Uses a live displayed egg price when exposed, otherwise the known ticket-tier cost.
-- Auto place / hatch egg interaction support.
-
-### Utility
-- Conservative low-rarity seed composting.
-- Gear, worms, and furniture buying only when a live price is exposed and affordable.
-- Auto claim index reward.
-- Guarded auto rebirth.
-- Anti-AFK.
-- Settings persistence when executor file APIs are available.
-- Diagnostics for Greedy Growers surfaces, river candidates, prompts/clicks, currency sources, and executor capabilities.
+- `ConveyorSeeds` = `Workspace.BigField.ConveyorSeeds`, whose `SeedHolder` children carry `SeedType`/`SpawnId`/`Rarity` attributes (not `dataKey`)
+- Currency = `Players.LocalPlayer.leaderstats.Cash`, a **StringValue** (e.g. `"$305.12Qi"`), not Number/IntValue
+- `SeedConveyorService.RF.RequestPurchase` — RemoteFunction, `:InvokeServer(spawnId)`, single positional argument
+- The conveyor cycles items every few seconds — a `SpawnId` scanned even a minute earlier can be stale; re-validate live right before firing
 
 ## Repo layout
 
-- `nightshade.lua` — stable public loader.
-- `v31/bootstrap.lua` — verified V3.1 bootstrap/correctness layer.
-- `v31/main.lua` — V3.1 core.
-- `v3/part-01.lua` — retained V3 rollback core.
+- `nightshade.lua` — the V5 single-file build (current).
+- `docs/superpowers/specs/` — design spec.
+- `docs/superpowers/plans/` — implementation plan.
+- `v3/`, `v31/`, `v4/` — archived, broken, kept for reference only. Do not use.
 
-## Notes
+## Security
 
-V3.1 contains no direct gameplay `FireServer()` or `InvokeServer()` calls. The script interacts with replicated prompt/click surfaces. Distance-free prompt/click interaction depends on executor support; Diagnostics shows the detected capabilities.
+`NightshadeSecurity.server.lua` (planned, not yet in this repo) is a defensive QA canary for `ServerScriptService` — it validates that the server correctly rejects spoofed identity, out-of-range values, and replay attempts. It does not replace real server-side validation and only talks to dedicated test endpoints (`ReplicatedStorage.NightshadeSecurity`), never production gameplay remotes.
