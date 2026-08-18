@@ -23,7 +23,7 @@ NS.State = {
 	connections = {},
 	scan = {
 		conveyorSeeds = nil,
-		serviceCandidates = {},
+		seedConveyorService = nil,
 		currencyCandidates = {},
 		seeds = {},
 	},
@@ -96,20 +96,21 @@ function NS.Scanner.findConveyorSeeds()
 	return found
 end
 
-function NS.Scanner.findServiceCandidates()
-	local candidates = {}
-	local patterns = { "Service", "Controller" }
+-- ponytail: exact-name lookup, not pattern-match — this game runs Knit, whose
+-- own package tree has hundreds of *Service*/*Controller*-named internals that
+-- drown out the real service under any capped pattern search. Confirmed live
+-- via runtime probe (see docs/superpowers/plans) that the real service sits at
+-- ReplicatedStorage.Packages._Index.sleitnick_knit@<ver>.knit.Services.SeedConveyorService
+function NS.Scanner.findSeedConveyorService()
+	local found = nil
 	for _, descendant in ipairs(ReplicatedStorage:GetDescendants()) do
-		if #candidates >= NS.Config.MaxCandidates then break end
-		for _, pattern in ipairs(patterns) do
-			if string.find(descendant.Name, pattern) then
-				table.insert(candidates, descendant)
-				break
-			end
+		if descendant.Name == "SeedConveyorService" then
+			found = descendant
+			break
 		end
 	end
-	NS.State.scan.serviceCandidates = candidates
-	return candidates
+	NS.State.scan.seedConveyorService = found
+	return found
 end
 
 function NS.Scanner.findCurrencyCandidates()
@@ -117,8 +118,14 @@ function NS.Scanner.findCurrencyCandidates()
 	local player = NS.Runtime.LocalPlayer
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if leaderstats then
+		-- ponytail: confirmed live that Cash is a StringValue (e.g. "$306.88Qi"),
+		-- not Number/IntValue — widen to any ValueBase, prefer one literally named Cash
+		local cash = leaderstats:FindFirstChild("Cash")
+		if cash and cash:IsA("ValueBase") then
+			table.insert(candidates, cash)
+		end
 		for _, child in ipairs(leaderstats:GetChildren()) do
-			if child:IsA("NumberValue") or child:IsA("IntValue") then
+			if child:IsA("ValueBase") and child ~= cash then
 				table.insert(candidates, child)
 			end
 		end
@@ -134,15 +141,25 @@ function NS.Scanner.findCurrencyCandidates()
 	return candidates
 end
 
+-- ponytail: confirmed live that ConveyorSeeds children are mostly utility
+-- singletons (SeedDestroyer, SeedSplashFX, ...); only "SeedHolder" children
+-- carry seed data, as attributes SeedType/SpawnId/Rarity — not "dataKey".
+-- SpawnId identifies this specific spawned instance and is what gets bought.
 function NS.Scanner.findSeeds()
 	local seeds = {}
 	if NS.State.scan.conveyorSeeds then
 		for _, child in ipairs(NS.State.scan.conveyorSeeds:GetChildren()) do
-			table.insert(seeds, {
-				instance = child,
-				name = child.Name,
-				dataKey = child:GetAttribute("dataKey"),
-			})
+			if child.Name == "SeedHolder" then
+				local spawnId = child:GetAttribute("SpawnId")
+				if spawnId ~= nil then
+					table.insert(seeds, {
+						instance = child,
+						name = child:GetAttribute("SeedType") or child.Name,
+						spawnId = spawnId,
+						rarity = child:GetAttribute("Rarity"),
+					})
+				end
+			end
 		end
 	end
 	NS.State.scan.seeds = seeds
@@ -151,7 +168,7 @@ end
 
 function NS.Scanner.runAll()
 	NS.Scanner.findConveyorSeeds()
-	NS.Scanner.findServiceCandidates()
+	NS.Scanner.findSeedConveyorService()
 	NS.Scanner.findCurrencyCandidates()
 	NS.Scanner.findSeeds()
 end
@@ -180,48 +197,33 @@ function NS.Resolvers.resolveCurrency()
 end
 
 function NS.Resolvers.resolveSeedConveyorService()
-	for _, inst in ipairs(NS.State.scan.serviceCandidates) do
-		if string.find(inst.Name, "SeedConveyorService") then
-			return true, inst, inst:GetFullName() .. " (" .. inst.ClassName .. ")"
-		end
+	local inst = NS.State.scan.seedConveyorService
+	if inst then
+		return true, inst, inst:GetFullName() .. " (" .. inst.ClassName .. ")"
 	end
-	local names = {}
-	for _, c in ipairs(NS.State.scan.serviceCandidates) do
-		table.insert(names, c.Name)
-	end
-	return false, nil, "not found by exact name; candidates: " .. table.concat(names, ", ")
+	return false, nil, "exact-name descendant 'SeedConveyorService' not found under ReplicatedStorage"
 end
 
+-- ponytail: confirmed live this is Knit's Comm folder layout — a Folder
+-- containing an "RF" subfolder of RemoteFunctions (RequestPurchase lives
+-- there), not a ModuleScript to require() and not a bare remote.
 function NS.Resolvers.resolveRequestPurchase()
 	local ok, serviceInst = NS.Resolvers.resolveSeedConveyorService()
 	if not ok then
 		return false, nil, "cannot resolve without SeedConveyorService"
 	end
 
-	local target = serviceInst
-	if serviceInst:IsA("ModuleScript") then
-		local success, mod = pcall(require, serviceInst)
-		if success and type(mod) == "table" then
-			target = mod
-		else
-			return false, nil, "SeedConveyorService is a ModuleScript but require() failed or returned non-table"
-		end
+	local rf = serviceInst:FindFirstChild("RF")
+	if not rf then
+		return false, nil, "no RF folder under " .. serviceInst:GetFullName()
 	end
 
-	if type(target) == "table" then
-		local fn = target.RequestPurchase
-		if fn then
-			return true, fn, "table method SeedConveyorService.RequestPurchase"
-		end
-		return false, nil, "module table has no RequestPurchase key"
+	local remote = rf:FindFirstChild("RequestPurchase")
+	if remote and remote:IsA("RemoteFunction") then
+		return true, remote, remote:GetFullName() .. " (RemoteFunction)"
 	end
 
-	local remote = serviceInst:FindFirstChild("RequestPurchase")
-	if remote and (remote:IsA("RemoteFunction") or remote:IsA("RemoteEvent")) then
-		return true, remote, remote:GetFullName() .. " (" .. remote.ClassName .. ")"
-	end
-
-	return false, nil, "no RequestPurchase child RemoteFunction/RemoteEvent under " .. serviceInst:GetFullName()
+	return false, nil, "no RequestPurchase RemoteFunction under " .. rf:GetFullName()
 end
 
 -- ===== UI =====
@@ -386,12 +388,8 @@ function NS.Boot.run()
 	report("purchase", 9, okPurchase, "RequestPurchase: " .. detailPurchase)
 
 	local seeds = NS.State.scan.seeds
-	local withKey = 0
-	for _, s in ipairs(seeds) do
-		if s.dataKey then withKey = withKey + 1 end
-	end
-	report("datakey", 10, withKey > 0,
-		"Seed dataKey values detected: " .. withKey .. "/" .. #seeds)
+	report("spawnid", 10, #seeds > 0,
+		"Seed SpawnId values detected: " .. #seeds .. " active SeedHolder(s)")
 
 	NS.UI.renderSeedButtons(seeds)
 end
@@ -404,10 +402,8 @@ function NS.Actions.dumpRuntimeContract()
 	NS.Logger.log("DUMP", "ConveyorSeeds: " ..
 		(NS.State.scan.conveyorSeeds and NS.State.scan.conveyorSeeds:GetFullName() or "nil"))
 
-	NS.Logger.log("DUMP", "Service candidates (" .. #NS.State.scan.serviceCandidates .. "):")
-	for _, inst in ipairs(NS.State.scan.serviceCandidates) do
-		NS.Logger.log("DUMP", "  " .. inst:GetFullName() .. " (" .. inst.ClassName .. ")")
-	end
+	NS.Logger.log("DUMP", "SeedConveyorService: " ..
+		(NS.State.scan.seedConveyorService and NS.State.scan.seedConveyorService:GetFullName() or "nil"))
 
 	NS.Logger.log("DUMP", "Currency candidates (" .. #NS.State.scan.currencyCandidates .. "):")
 	for _, c in ipairs(NS.State.scan.currencyCandidates) do
@@ -420,7 +416,7 @@ function NS.Actions.dumpRuntimeContract()
 
 	NS.Logger.log("DUMP", "Seeds (" .. #NS.State.scan.seeds .. "):")
 	for _, s in ipairs(NS.State.scan.seeds) do
-		NS.Logger.log("DUMP", "  " .. s.name .. " dataKey=" .. tostring(s.dataKey))
+		NS.Logger.log("DUMP", "  " .. s.name .. " spawnId=" .. tostring(s.spawnId) .. " rarity=" .. tostring(s.rarity))
 	end
 
 	NS.Logger.log("DUMP", "----- End Dump -----")
@@ -443,8 +439,8 @@ function NS.Actions.testPurchase(seed)
 		NS.Logger.fail("Test Purchase pressed with no seed selected")
 		return
 	end
-	if not seed.dataKey then
-		NS.Logger.fail("Selected seed " .. seed.name .. " has no dataKey attribute")
+	if seed.spawnId == nil then
+		NS.Logger.fail("Selected seed " .. seed.name .. " has no SpawnId attribute")
 		return
 	end
 
@@ -455,28 +451,28 @@ function NS.Actions.testPurchase(seed)
 		return
 	end
 
-	NS.Logger.resolve("Seed: " .. seed.name .. " dataKey=" .. tostring(seed.dataKey))
+	NS.Logger.resolve("Seed: " .. seed.name .. " spawnId=" .. tostring(seed.spawnId) .. " rarity=" .. tostring(seed.rarity))
 	NS.Logger.resolve("Service: " .. serviceDetail)
 	NS.Logger.resolve("RequestPurchase: " .. fnDetail)
 
 	local before = NS.Verification.snapshotCurrency()
 	NS.Logger.verify("Cash before = " .. tostring(before))
 
-	NS.Logger.action('RequestPurchase("' .. tostring(seed.dataKey) .. '")')
+	NS.Logger.action("RequestPurchase(" .. tostring(seed.spawnId) .. ")")
 
 	local success, result
 	if fn:IsA("RemoteFunction") then
 		success, result = pcall(function()
-			return fn:InvokeServer(seed.dataKey)
+			return fn:InvokeServer(seed.spawnId)
 		end)
 	elseif fn:IsA("RemoteEvent") then
 		success, result = pcall(function()
-			fn:FireServer(seed.dataKey)
+			fn:FireServer(seed.spawnId)
 			return "fired (RemoteEvent, no return value)"
 		end)
 	else
 		success, result = pcall(function()
-			return fn(seed.dataKey)
+			return fn(seed.spawnId)
 		end)
 	end
 
