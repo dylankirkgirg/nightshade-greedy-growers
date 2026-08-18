@@ -511,10 +511,20 @@ function NS.Actions.testPurchase(seed)
 	local after = NS.Verification.snapshotCurrency()
 	NS.Logger.verify("Cash after = " .. tostring(after))
 
-	if before ~= nil and after ~= nil and after ~= before then
-		NS.Logger.pass("Purchase confirmed: cash changed " .. tostring(before) .. " -> " .. tostring(after))
+	-- ponytail: Cash is a rounded display string ("$305.12Qi") — a cheap seed's
+	-- cost often doesn't move the visible digits at quintillion scale, so a
+	-- string-equal cash diff false-negatives even on a real purchase. Confirmed
+	-- live: RequestPurchase returned true with before==after string. Trust the
+	-- server's own boolean result as primary signal; cash diff is corroboration
+	-- only, not a requirement.
+	if result == true then
+		if before ~= nil and after ~= nil and after ~= before then
+			NS.Logger.pass("Purchase confirmed: server returned true, cash changed " .. tostring(before) .. " -> " .. tostring(after))
+		else
+			NS.Logger.pass("Purchase confirmed: server returned true (cash delta too small to show in rounded display)")
+		end
 	else
-		NS.Logger.fail("Purchase unconfirmed: cash unchanged (before=" .. tostring(before) .. ", after=" .. tostring(after) .. ")")
+		NS.Logger.fail("Purchase unconfirmed: server returned " .. tostring(result) .. " (before=" .. tostring(before) .. ", after=" .. tostring(after) .. ")")
 	end
 end
 
